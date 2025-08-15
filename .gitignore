@@ -6,3 +6,6 @@ faiss_verilog_db
 verilogeval-v2.csv
 
 openlane_run
+pyspice_datasets
+faiss_index_lcapy_docs
+faiss_index_pyspice_docs

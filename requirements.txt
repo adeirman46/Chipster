@@ -50,9 +50,9 @@ sootty
 accelerate
 
 # Optional (Analog)
-pyspice
-schemdraw
-unstructured
+# pyspice
+# schemdraw
+# networkx
 
 # Crawling data
 crawl4ai
@@ -66,3 +66,4 @@ sentence-transformers
 langchain-huggingface
 graphviz
 sootty
+unstructured

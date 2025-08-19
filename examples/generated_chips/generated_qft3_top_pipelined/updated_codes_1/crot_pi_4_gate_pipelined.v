@@ -1,15 +1,7 @@
 `include "fixed_point_params.vh"
-
 //======================================================================
 // Optimized CROT Gate for theta = pi/4 (Pipelined)
 //======================================================================
-// This module replaces the generic complex multiplier for rotations by pi/4.
-// It implements multiplication by (C + Cj) where C = cos(pi/4) = sin(pi/4).
-// (ar + ai*j) * (C + Cj) = (ar*C - ai*C) + j*(ar*C + ai*C)
-// pr = (ar - ai) * C
-// pi = (ar + ai) * C
-// This saves two multipliers compared to the generic version.
-// Latency: 3 cycles
 module crot_pi_4_gate_pipelined(
     input                         clk,
     input                         rst_n,
@@ -17,7 +9,6 @@ module crot_pi_4_gate_pipelined(
     output signed [`TOTAL_WIDTH-1:0] pr, pi
 );
     // Constant for ~0.707 (1/sqrt(2)) in S1.4 format (0.6875)
-    // Same interpretation as ONE_OVER_SQRT2 in h_gate_simplified.
     localparam signed [`TOTAL_WIDTH-1:0] C_VAL = 11;
 
     // Intermediate widths
@@ -43,7 +34,6 @@ module crot_pi_4_gate_pipelined(
             pr_prod_s2 <= 0;
             pi_prod_s2 <= 0;
         end else begin
-            // Replacement of X * 11 with (X << 3) + (X << 1) + X
             pr_prod_s2 <= (sub_s1 << 3) + (sub_s1 << 1) + sub_s1;
             pi_prod_s2 <= (add_s1 << 3) + (add_s1 << 1) + add_s1;
         end

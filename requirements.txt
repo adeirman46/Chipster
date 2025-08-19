@@ -67,3 +67,10 @@ langchain-huggingface
 graphviz
 sootty
 unstructured
+
+# # Deep Agents
+# deepagents
+
+# # Database Creation
+# fitz
+# pdf2image

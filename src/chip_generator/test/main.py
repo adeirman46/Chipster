@@ -19,9 +19,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # --- Gemini LLM Initialization ---
-# Make sure you have GOOGLE_API_KEY in your .env file
 try:
-    # Using a powerful model suitable for code generation and analysis
     llm = ChatGoogleGenerativeAI(model="gemini-2.5-pro")
 except Exception as e:
     st.error(f"Error initializing Gemini LLM: {e}. Make sure your GOOGLE_API_KEY is set in a .env file.")
@@ -34,7 +32,7 @@ class AgentState(TypedDict):
     design_name: str
     verilog_files: List[str]
     original_verilog_code: Dict[str, str]
-    modified_verilog_code: Optional[str] # Now a single string
+    modified_verilog_code: Optional[str]
     decomposed_files: Dict[str, str]
     testbench_file: Optional[str]
     original_testbench_code: Optional[str]
@@ -42,14 +40,19 @@ class AgentState(TypedDict):
     config: Dict[str, Any]
     run_path: str
     update_attempt: int
+    # Constraints
     max_die_width_mm: float
     max_die_height_mm: float
-    die_area_mm2: float
+    max_pins: int
+    # Metrics
     die_width_mm: float
     die_height_mm: float
+    pin_count: int
+    # Flow Control
     simulation_passed: bool
     simulation_output: str
     feedback_log: List[str]
+    # OpenLane States
     synthesis_state_out: Optional[State]
     floorplan_state_out: Optional[State]
     tap_endcap_state_out: Optional[State]
@@ -67,6 +70,7 @@ class AgentState(TypedDict):
     drc_state_out: Optional[State]
     spice_extraction_state_out: Optional[State]
     lvs_state_out: Optional[State]
+    lvs_step_dir: Optional[str]
     worst_tns: Optional[float]
     worst_wns: Optional[float]
 
@@ -81,7 +85,7 @@ def file_processing_agent(state: AgentState) -> Dict[str, Any]:
     top_level_module = state["top_level_module"]
     design_name = top_level_module
 
-    run_path = os.path.abspath(os.path.join("..", "..", "examples", "generated_chips", f"generated_{design_name}"))
+    run_path = os.path.abspath(os.path.join("..", "..", "..", "examples", "generated_chips", f"generated_{design_name}"))
     if os.path.exists(run_path):
         shutil.rmtree(run_path)
     os.makedirs(run_path, exist_ok=True)
@@ -131,38 +135,36 @@ def file_processing_agent(state: AgentState) -> Dict[str, Any]:
 
 def verilog_corrector_agent(state: AgentState) -> Dict[str, Any]:
     st.write("---")
-    st.write("### 🧠 Agent 2: Verilog Corrector (LLM)")
-    st.info("This agent uses a Large Language Model (LLM) to analyze and rewrite the Verilog code based on feedback from failed simulation or layout stages.")
+    st.write("### 🧠 Agent 2: Verilog Area/Sim Corrector (LLM)")
+    st.info("This agent uses an LLM to rewrite Verilog to fix simulation errors or reduce the design's physical area.")
 
     if not llm:
         st.error("Gemini LLM not initialized. Skipping correction.")
         return {"modified_verilog_code": "\n".join(state["original_verilog_code"].values())}
 
     feedback = "\n".join(state['feedback_log'])
-    st.write("#### Feedback for Correction:")
+    st.write("#### Feedback for Correction (Area/Simulation):")
     st.code(feedback, language='text')
 
     prompt = f"""
-    You are an expert Verilog designer. Your task is to optimize the given Verilog code based on the following feedback.
-    The primary goal is to simplify the design to reduce its area or fix simulation errors. You may need to create new, simplified modules.
+    You are an expert Verilog designer. Your task is to optimize the given Verilog code based on the following feedback from a failed EDA tool run.
+    The primary goal is to **simplify the design to reduce its area** or fix simulation errors.
 
-    Feedback:
+    **Feedback from Tools:**
     {feedback}
 
-    Optimization Strategies:
-    Area Reduction Strategies (Apply in order of priority):
-    1.  **Operator Strength Reduction:** Replace expensive operators like multipliers (`*`) with a series of additions or bit-shifts if possible, especially if one operand is a constant.
-    2.  **Module Simplification/Removal:** If a module performs a complex function (e.g., sine, cosine) but is used with constant inputs, replace the module instantiation with the pre-calculated result. If a module is instantiated but its functionality is not fully required, simplify or replace it.
-    3.  **Aggressive Bit-width Reduction:** This is the most critical step! if first and second step still not reduced size, reduced to 3/4 original bits. Analyze the logic and drastically reduce the bit-width of registers, wires, and parameters. For example, if a 32-bit register only ever holds values up to 100, reduce it to 7 bits (`[6:0]`). You MUST ensure this change is propagated to all connected modules and calculations. Be bold. Carefully reduce the bit-width of registers and wires if the full range is not necessary. Be extremely careful to update all related calculations and instantiations to avoid functional errors.
+    **Optimization Strategies (Apply in order of priority):**
+    1.  **Operator Strength Reduction:** Replace expensive operators like multipliers (`*`) with a series of additions or bit-shifts if possible.
+    2.  **Module Simplification/Removal:** If a module is used with constant inputs, replace its instantiation with the pre-calculated result. Simplify or remove modules if their full functionality is not required.
+    3.  **Aggressive Bit-width Reduction:** This is a critical step for area reduction. Analyze the logic and drastically reduce the bit-width of registers, wires, and parameters. For example, if a 32-bit register only ever holds values up to 100, reduce it to 7 bits (`[6:0]`). You MUST ensure this change is propagated to all connected modules and calculations.
 
-    RULES:
-    - You MUST generate pure, synthesizable Verilog-2001 compatible code. Pay close attention to module instantiation syntax.
-    - DO NOT use any SystemVerilog features like `logic`, `always_ff`, `always_comb`, or tasks/functions with multiple statements without `begin`/`end` blocks.
+    **RULES:**
+    - You MUST generate pure, synthesizable Verilog-2001 compatible code.
     - Combine all Verilog modules into a single, monolithic block of code.
     - Do NOT include the testbench.
     - Your output MUST be only the Verilog code, enclosed in a single markdown block.
 
-    Original Verilog Code:
+    **Original Verilog Code:**
     ---
     """
     code_to_correct = state.get("decomposed_files") or state["original_verilog_code"]
@@ -170,25 +172,21 @@ def verilog_corrector_agent(state: AgentState) -> Dict[str, Any]:
         prompt += f"--- {filename} ---\n{code}\n"
     prompt += "---"
 
-    st.write("🤖 Asking Gemini to optimize the Verilog code...")
+    st.write("🤖 Asking Gemini to optimize the Verilog code for Area/Sim...")
     try:
         response = llm.invoke(prompt)
         response_content = response.content
         st.write("#### Gemini's Raw Response:")
-        st.markdown(response_content)  # Show the full response for debugging
+        st.markdown(response_content)
 
-        # More flexible regex to find the Verilog code block
         modified_code_match = re.search(r"```(?:verilog)?\s*\n(.*?)```", response_content, re.DOTALL)
-
         if not modified_code_match:
-            st.error("LLM response parsing failed. Could not find a valid Verilog code block in the response.")
-            st.info("The agent expected the code to be enclosed in ```verilog ... ```. Falling back to previous code version.")
+            st.error("LLM response parsing failed. Could not find a valid Verilog code block. Falling back to previous code version.")
             return {"modified_verilog_code": "\n".join(code_to_correct.values())}
 
         modified_verilog_code = modified_code_match.group(1).strip()
         if not modified_verilog_code:
-            st.error("LLM response parsing failed. The Verilog code block was empty.")
-            st.info("Falling back to previous code version.")
+            st.error("LLM response parsing failed. The Verilog code block was empty. Falling back to previous code version.")
             return {"modified_verilog_code": "\n".join(code_to_correct.values())}
 
         st.success("✅ Successfully extracted optimized Verilog code from LLM response.")
@@ -196,7 +194,6 @@ def verilog_corrector_agent(state: AgentState) -> Dict[str, Any]:
 
     except Exception as e:
         st.error(f"An error occurred while communicating with the Gemini API: {e}")
-        st.info("This could be due to an invalid API key, network issues, or a problem with the model service. Falling back to previous code version.")
         import traceback
         st.code(traceback.format_exc())
         return {"modified_verilog_code": "\n".join(code_to_correct.values())}
@@ -204,7 +201,7 @@ def verilog_corrector_agent(state: AgentState) -> Dict[str, Any]:
 def code_decomposer_agent(state: AgentState) -> Dict[str, Any]:
     st.write("---")
     st.write("### 🧩 Agent 3: Code Decomposer (LLM-Powered)")
-    st.info("After the LLM generates a single block of corrected Verilog, this agent intelligently splits it back into separate files, one for each module.")
+    st.info("After an LLM generates a single block of corrected Verilog, this agent intelligently splits it back into separate files, one for each module.")
 
     monolithic_code = state.get("modified_verilog_code")
     if not monolithic_code:
@@ -217,7 +214,7 @@ def code_decomposer_agent(state: AgentState) -> Dict[str, Any]:
     You are an expert Verilog refactoring tool.
     Your task is to analyze the following monolithic Verilog code and decompose it into multiple files.
 
-    RULES:
+    **RULES:**
     1.  Separate each `module` into its own file. The filename should be the module name with a `.v` extension (e.g., `module_name.v`).
     2.  Return a single, valid JSON object where keys are the filenames and values are the complete code content for that file.
     3.  Your final output **MUST** be only the JSON object, enclosed in a markdown block.
@@ -226,9 +223,6 @@ def code_decomposer_agent(state: AgentState) -> Dict[str, Any]:
     ```verilog
     {monolithic_code}
     ```
-
-    **RESPONSE (Valid JSON object only):**
-    ```json
     """
 
     response = llm.invoke(prompt)
@@ -236,14 +230,11 @@ def code_decomposer_agent(state: AgentState) -> Dict[str, Any]:
     st.markdown(response.content)
 
     try:
-        # More robust JSON extraction
         json_str = None
-        # Try to find the JSON block enclosed in markdown
         match = re.search(r"```json\s*(\{.*?\})\s*```", response.content, re.DOTALL)
         if match:
             json_str = match.group(1)
         else:
-            # If no markdown block is found, find the first and last curly brace
             start = response.content.find('{')
             end = response.content.rfind('}')
             if start != -1 and end != -1 and end > start:
@@ -263,11 +254,56 @@ def code_decomposer_agent(state: AgentState) -> Dict[str, Any]:
 
     except (json.JSONDecodeError, ValueError) as e:
         st.error(f"Failed to parse valid JSON from decomposer. Error: {e}. Falling back to previous version.")
-        # Fallback to the last known good decomposition
         return {"decomposed_files": state.get("decomposed_files", state["original_verilog_code"])}
 
     return {"decomposed_files": decomposed_files}
 
+# --- NEW AGENT TO FIX THE BUG ---
+def design_name_updater_agent(state: AgentState) -> Dict[str, Any]:
+    st.write("---")
+    st.write("### 📝 Agent 3.5: Design Name Updater")
+    st.info("This agent analyzes the decomposed files to find the new top-level module name after code modifications.")
+    
+    decomposed_files = state["decomposed_files"]
+    if not decomposed_files:
+        st.warning("No decomposed files to analyze. Keeping original design name.")
+        return {}
+
+    # Find all module definitions (module names are filenames without extension)
+    defined_modules = {Path(f).stem for f in decomposed_files.keys()}
+
+    # Find all module instantiations
+    instantiated_modules = set()
+    # This regex finds patterns like "module_name instance_name (" or "#("
+    instantiation_re = re.compile(r"\s*(\w+)\s+(?:#\s*\(.*\)\s*)?\w+\s*\(", re.MULTILINE)
+
+    for content in decomposed_files.values():
+        matches = instantiation_re.findall(content)
+        for module_name in matches:
+            # Exclude common keywords that might look like instantiations
+            if module_name not in ["module", "input", "output", "wire", "reg"]:
+                instantiated_modules.add(module_name)
+
+    # The top-level module is the one that is defined but never instantiated
+    top_level_candidates = defined_modules - instantiated_modules
+    
+    new_design_name = state["design_name"] # Default to old name
+
+    if len(top_level_candidates) == 1:
+        new_design_name = top_level_candidates.pop()
+        if new_design_name != state["design_name"]:
+            st.success(f"✅ New top-level module detected: **{new_design_name}**")
+        else:
+            st.write("✅ Top-level module name remains the same.")
+    elif len(top_level_candidates) > 1:
+        st.warning(f"Multiple top-level candidates found: {top_level_candidates}. Defaulting to the previous name: {new_design_name}")
+    else:
+        st.warning(f"Could not determine a unique top-level module. Defaulting to the previous name: {new_design_name}")
+
+    return {
+        "design_name": new_design_name,
+        "top_level_module": new_design_name
+    }
 
 def testbench_corrector_agent(state: AgentState) -> Dict[str, Any]:
     st.write("---")
@@ -284,11 +320,11 @@ def testbench_corrector_agent(state: AgentState) -> Dict[str, Any]:
     You are an expert Verilog testbench writer. Your task is to ensure the given testbench is compatible with the provided design modules.
     The design modules might have been changed (e.g., module names, ports, bit widths). Update the testbench accordingly.
 
-    RULES:
+    **RULES:**
     - You MUST generate pure Verilog-2001 compatible code for the testbench.
     - DO NOT use any SystemVerilog features.
 
-    Design Modules:
+    **Design Modules:**
     ---
     """
     for filename, code in state['decomposed_files'].items():
@@ -296,7 +332,7 @@ def testbench_corrector_agent(state: AgentState) -> Dict[str, Any]:
 
     prompt += f"""
     ---
-    Original Testbench Code (`{os.path.basename(state['testbench_file'])}`):
+    **Original Testbench Code (`{os.path.basename(state['testbench_file'])}`):**
     ---
     {tb_to_correct}
     ---
@@ -305,11 +341,10 @@ def testbench_corrector_agent(state: AgentState) -> Dict[str, Any]:
 
     st.write("🤖 Asking Gemini to update the testbench...")
     response = llm.invoke(prompt)
-
     st.write("#### Gemini's Response:")
     st.markdown(response.content)
 
-    modified_code = re.search(r"```verilog\n(.*?)```", response.content, re.DOTALL)
+    modified_code = re.search(r"```(?:verilog)?\s*\n(.*?)```", response.content, re.DOTALL)
     if not modified_code:
         st.error("Could not extract corrected testbench code from LLM response.")
         return {"modified_testbench_code": tb_to_correct}
@@ -354,7 +389,6 @@ def file_saver_agent(state: AgentState) -> Dict[str, Any]:
         tb_filename = os.path.basename(state["testbench_file"])
         file_path = os.path.join(save_path, tb_filename)
         with open(file_path, 'w') as f: f.write(tb_to_save)
-        # Add the testbench to the list of files for simulation
         saved_verilog_files.append(os.path.relpath(file_path, state['run_path']))
         st.write(f"  - Saved `{tb_filename}`")
 
@@ -367,17 +401,14 @@ def file_saver_agent(state: AgentState) -> Dict[str, Any]:
 def icarus_simulation_agent(state: AgentState) -> Dict[str, Any]:
     st.write("---")
     st.write("### 🔬 Agent 6: Icarus Simulation")
-    st.info("This agent compiles and runs a simulation using the Icarus Verilog simulator to functionally verify the design's behavior before attempting the expensive synthesis and layout process.")
+    st.info("This agent compiles and runs a simulation using the Icarus Verilog simulator to functionally verify the design's behavior.")
 
     if not state.get('testbench_file'):
         st.warning("No testbench file found. Skipping simulation.")
         return {"simulation_passed": True, "simulation_output": "No testbench provided."}
 
     run_path = state['run_path']
-    # Use the latest saved Verilog files for simulation
     verilog_files_to_sim = [os.path.join(run_path, f) for f in state['verilog_files']]
-
-    # Ensure the source directory is correctly identified from the file paths
     src_dir = os.path.dirname(verilog_files_to_sim[0])
     output_vvp_file = os.path.join(run_path, "design.vvp")
 
@@ -408,31 +439,36 @@ def icarus_simulation_agent(state: AgentState) -> Dict[str, Any]:
 def setup_agent(state: AgentState) -> Dict[str, Any]:
     st.write("---")
     st.write("### 🛠️ Agent 7: OpenLane Setup")
-    st.info("This agent initializes the OpenLane 2.0 configuration for the design, setting up the PDK, clock signal, and other core parameters for the physical design flow.")
+    st.info("This agent initializes the OpenLane 2.0 configuration for the design.")
 
     config_or_dict = state.get('config')
+    design_name = state["design_name"] # Use the potentially updated design name
+
+    # On loops, the config exists. We need to create a new one if the design name changed.
+    if config_or_dict and config_or_dict["DESIGN_NAME"] != design_name:
+        st.warning(f"Design name changed from '{config_or_dict['DESIGN_NAME']}' to '{design_name}'. Re-initializing configuration.")
+        config_or_dict = None # Force re-initialization
 
     if config_or_dict:
         st.write("♻️ Looping back: Using existing (potentially modified) configuration.")
-        # On the correction loop from STA, this will be a dict. Otherwise, it's a Config object.
         if isinstance(config_or_dict, dict):
-            config = Config(config_or_dict) # Create a new Config object from the modified dict
+            config = Config(config_or_dict)
         else:
-            config = config_or_dict # It's already a Config object
+            config = config_or_dict
 
-        # Clean up previous OpenLane run directories to avoid conflicts and ensure a fresh start
         for item in os.listdir(state['run_path']):
             if item.startswith('runs'):
                 shutil.rmtree(os.path.join(state['run_path'], item))
                 st.write(f"🧹 Removed old OpenLane run directory: {item}")
     else:
-        st.write("🚀 Initial run: Creating new OpenLane configuration.")
+        st.write("🚀 Initial run or Design Name changed: Creating new OpenLane configuration.")
         config = Config.interactive(
-            state["design_name"], PDK="gf180mcuC",
-            CLOCK_PORT="clk", CLOCK_NET="clk", CLOCK_PERIOD=10,
+            design_name, PDK="gf180mcuC", # Use the correct design name
+            CLOCK_PORT="clk", CLOCK_NET="clk", CLOCK_PERIOD=1000,
             PRIMARY_GDSII_STREAMOUT_TOOL="klayout",
         )
     st.write("✅ OpenLane configuration loaded.")
+    st.info(f"**Design Name for this run: {config['DESIGN_NAME']}**")
     st.info(f"**Clock Period set to: {config['CLOCK_PERIOD']} ns**")
     return {"config": config}
 
@@ -440,15 +476,15 @@ def setup_agent(state: AgentState) -> Dict[str, Any]:
 def synthesis_agent(state: AgentState) -> Dict[str, Any]:
     st.write("---")
     st.write("### 🔬 Agent 8: Synthesis")
-    st.info("This agent converts the high-level Verilog RTL (Register Transfer Level) code into a gate-level netlist, which is a low-level description of the circuit using standard logic gates.")
+    st.info("This agent converts the high-level Verilog RTL into a gate-level netlist.")
 
-    # Filter out testbenches from synthesizable files
     synthesizable_files = [f for f in state["verilog_files"] if "_tb" not in f.lower() and "tb." not in f.lower()]
     st.write("Synthesizing the following files:")
     for f in synthesizable_files:
         st.write(f"- `{f}`")
 
     Synthesis = Step.factory.get("Yosys.Synthesis")
+    # Pass the potentially updated design name to the synthesis step
     synthesis_step = Synthesis(config=state["config"], state_in=State(), VERILOG_FILES=synthesizable_files)
     synthesis_step.start()
     report_path = os.path.join(synthesis_step.step_dir, "reports", "stat.json")
@@ -461,7 +497,7 @@ def synthesis_agent(state: AgentState) -> Dict[str, Any]:
 def floorplan_agent(state: AgentState) -> Dict[str, Any]:
     st.write("---")
     st.write("### 🏗️ Agent 9: Floorplanning")
-    st.info("This agent defines the overall chip dimensions (die area), places the I/O pins on the boundary, and allocates space for the core logic.")
+    st.info("This agent defines the overall chip dimensions (die area).")
     Floorplan = Step.factory.get("OpenROAD.Floorplan")
     floorplan_step = Floorplan(config=state["config"], state_in=state["synthesis_state_out"])
     floorplan_step.start()
@@ -497,7 +533,7 @@ def floorplan_agent(state: AgentState) -> Dict[str, Any]:
 def tap_endcap_agent(state: AgentState) -> Dict[str, Any]:
     st.write("---")
     st.write("### 💠 Agent 10: Tap/Endcap Insertion")
-    st.info("This agent inserts special cells (tap cells and endcaps) into the floorplan to prevent latch-up issues and ensure proper row termination.")
+    st.info("This agent inserts special cells to prevent latch-up issues.")
     TapEndcap = Step.factory.get("OpenROAD.TapEndcapInsertion")
     tap_step = TapEndcap(config=state["config"], state_in=state["floorplan_state_out"])
     tap_step.start()
@@ -506,7 +542,7 @@ def tap_endcap_agent(state: AgentState) -> Dict[str, Any]:
 def io_placement_agent(state: AgentState) -> Dict[str, Any]:
     st.write("---")
     st.write("### 📍 Agent 11: I/O Pin Placement")
-    st.info("This agent performs the detailed placement of the input/output (I/O) pads around the periphery of the chip.")
+    st.info("This agent performs the detailed placement of the I/O pads.")
     IOPlacement = Step.factory.get("OpenROAD.IOPlacement")
     ioplace_step = IOPlacement(config=state["config"], state_in=state["tap_endcap_state_out"])
     ioplace_step.start()
@@ -515,7 +551,7 @@ def io_placement_agent(state: AgentState) -> Dict[str, Any]:
 def generate_pdn_agent(state: AgentState) -> Dict[str, Any]:
     st.write("---")
     st.write("### ⚡ Agent 12: Power Distribution Network (PDN)")
-    st.info("This agent generates the grid of power (Vdd) and ground (GND) stripes that supply electricity to all the cells in the design.")
+    st.info("This agent generates the grid of power and ground stripes.")
     GeneratePDN = Step.factory.get("OpenROAD.GeneratePDN")
     pdn_step = GeneratePDN(config=state["config"], state_in=state["io_placement_state_out"], FP_PDN_VWIDTH=2, FP_PDN_HWIDTH=2, FP_PDN_VPITCH=30, FP_PDN_HPITCH=30)
     pdn_step.start()
@@ -524,7 +560,7 @@ def generate_pdn_agent(state: AgentState) -> Dict[str, Any]:
 def global_placement_agent(state: AgentState) -> Dict[str, Any]:
     st.write("---")
     st.write("### 🌍 Agent 13: Global Placement")
-    st.info("This agent determines the approximate locations for all the standard cells in the core area, aiming to minimize wire length and congestion.")
+    st.info("This agent determines the approximate locations for all standard cells.")
     GlobalPlacement = Step.factory.get("OpenROAD.GlobalPlacement")
     gpl_step = GlobalPlacement(config=state["config"], state_in=state["pdn_state_out"])
     gpl_step.start()
@@ -533,7 +569,7 @@ def global_placement_agent(state: AgentState) -> Dict[str, Any]:
 def detailed_placement_agent(state: AgentState) -> Dict[str, Any]:
     st.write("---")
     st.write("### 📐 Agent 14: Detailed Placement")
-    st.info("This agent refines the placement from the previous step, legalizing all cell positions to snap them onto the site grid and removing any overlaps.")
+    st.info("This agent refines placement, legalizing all cell positions.")
     DetailedPlacement = Step.factory.get("OpenROAD.DetailedPlacement")
     dpl_step = DetailedPlacement(config=state["config"], state_in=state["global_placement_state_out"])
     dpl_step.start()
@@ -542,7 +578,7 @@ def detailed_placement_agent(state: AgentState) -> Dict[str, Any]:
 def cts_agent(state: AgentState) -> Dict[str, Any]:
     st.write("---")
     st.write("### 🌳 Agent 15: Clock Tree Synthesis (CTS)")
-    st.info("This agent builds the clock tree, a network of buffers that distributes the clock signal to all sequential elements (flip-flops) with minimal skew.")
+    st.info("This agent builds the clock tree to distribute the clock signal.")
     CTS = Step.factory.get("OpenROAD.CTS")
     cts_step = CTS(config=state["config"], state_in=state["detailed_placement_state_out"])
     cts_step.start()
@@ -550,8 +586,8 @@ def cts_agent(state: AgentState) -> Dict[str, Any]:
 
 def global_routing_agent(state: AgentState) -> Dict[str, Any]:
     st.write("---")
-    st.write("### 🗺️ Agent 14: Global Routing")
-    st.write("""Planning the paths for the interconnect wires.""")
+    st.write("### 🗺️ Agent 16: Global Routing")
+    st.info("This agent plans the paths for the interconnect wires.")
     GlobalRouting = Step.factory.get("OpenROAD.GlobalRouting")
     grt_step = GlobalRouting(config=state["config"], state_in=state["cts_state_out"])
     grt_step.start()
@@ -564,7 +600,7 @@ def global_routing_agent(state: AgentState) -> Dict[str, Any]:
 def detailed_routing_agent(state: AgentState) -> Dict[str, Any]:
     st.write("---")
     st.write("### ✍️ Agent 17: Detailed Routing")
-    st.info("This agent performs the final, exact routing of all wires, connecting the cell pins according to the netlist and global routing plan.")
+    st.info("This agent performs the final, exact routing of all wires.")
     DetailedRouting = Step.factory.get("OpenROAD.DetailedRouting")
     drt_step = DetailedRouting(config=state["config"], state_in=state["global_routing_state_out"])
     drt_step.start()
@@ -573,7 +609,7 @@ def detailed_routing_agent(state: AgentState) -> Dict[str, Any]:
 def fill_insertion_agent(state: AgentState) -> Dict[str, Any]:
     st.write("---")
     st.write("### 🧱 Agent 18: Fill Insertion")
-    st.info("This agent adds non-functional 'filler' cells to empty spaces in the layout to ensure metal density uniformity, which is required for manufacturing.")
+    st.info("This agent adds 'filler' cells to ensure metal density uniformity.")
     FillInsertion = Step.factory.get("OpenROAD.FillInsertion")
     fill_step = FillInsertion(config=state["config"], state_in=state["detailed_routing_state_out"])
     fill_step.start()
@@ -582,7 +618,7 @@ def fill_insertion_agent(state: AgentState) -> Dict[str, Any]:
 def rcx_agent(state: AgentState) -> Dict[str, Any]:
     st.write("---")
     st.write("### 🔌 Agent 19: Parasitics Extraction (RCX)")
-    st.info("This agent extracts the parasitic resistance (R) and capacitance (C) of the routed wires. This information is crucial for accurate timing analysis.")
+    st.info("This agent extracts the parasitic resistance (R) and capacitance (C) of wires.")
     RCX = Step.factory.get("OpenROAD.RCX")
     rcx_step = RCX(config=state["config"], state_in=state["fill_insertion_state_out"])
     rcx_step.start()
@@ -591,7 +627,7 @@ def rcx_agent(state: AgentState) -> Dict[str, Any]:
 def sta_agent(state: AgentState) -> Dict[str, Any]:
     st.write("---")
     st.write("### ⏱️ Agent 20: Static Timing Analysis (STA)")
-    st.info("This final analysis step uses the extracted parasitics to verify that the chip meets its timing constraints (i.e., that signals arrive on time).")
+    st.info("This analysis step verifies that the chip meets its timing constraints.")
     STAPostPNR = Step.factory.get("OpenROAD.STAPostPNR")
     sta_step = STAPostPNR(config=state["config"], state_in=state["rcx_state_out"])
     sta_step.start()
@@ -599,8 +635,7 @@ def sta_agent(state: AgentState) -> Dict[str, Any]:
     sta_results = []
     value_re = re.compile(r":\s*(-?[\d\.]+)")
     reports_to_find = ["tns.max.rpt", "tns.min.rpt", "wns.max.rpt", "wns.min.rpt"]
-    all_tns = []
-    all_wns = []
+    all_tns, all_wns = [], []
 
     for root, _, files in os.walk(sta_step.step_dir):
         for file in files:
@@ -613,10 +648,8 @@ def sta_agent(state: AgentState) -> Dict[str, Any]:
                     if match:
                         value = float(match.group(1))
                         sta_results.append([corner, metric_name, value])
-                        if "Tns Max" in metric_name:
-                           all_tns.append(value)
-                        if "Wns Max" in metric_name:
-                           all_wns.append(value)
+                        if "Tns Max" in metric_name: all_tns.append(value)
+                        if "Wns Max" in metric_name: all_wns.append(value)
 
     worst_tns = min(all_tns) if all_tns else 0
     worst_wns = min(all_wns) if all_wns else 0
@@ -625,77 +658,51 @@ def sta_agent(state: AgentState) -> Dict[str, Any]:
     if sta_results:
         df_sta = pd.DataFrame(sta_results, columns=["Corner", "Metric", "Value (ps)"])
         pivoted_df = df_sta.pivot(index='Metric', columns='Corner', values='Value (ps)').fillna(0)
-        def style_violations(val):
-             try:
-                 color = 'green' if float(val) >= 0 else 'red'
-                 return f'color: {color}'
-             except (ValueError, TypeError): return ''
-        styled_df = pivoted_df.style.applymap(style_violations).format("{:.2f}")
+        styled_df = pivoted_df.style.applymap(lambda val: f'color: {"red" if val < 0 else "green"}').format("{:.2f}")
         st.dataframe(styled_df, use_container_width=True)
     else:
         st.warning("Could not parse key STA report files (TNS, WNS).")
 
     return {
         "sta_state_out": sta_step.state_out,
-        "worst_tns": worst_tns / 1000.0, # Convert ps to ns
-        "worst_wns": worst_wns / 1000.0  # Convert ps to ns
+        "worst_tns": worst_tns / 1000.0,
+        "worst_wns": worst_wns / 1000.0
     }
 
 def sta_correction_agent(state: AgentState) -> Dict[str, Any]:
     st.write("---")
     st.write("### 🤖 Agent 21: STA Corrector")
-    st.info("If timing violations are found, this agent attempts to fix them by increasing the clock period (i.e., slowing down the chip's target frequency).")
+    st.info("If timing violations are found, this agent attempts to fix them by increasing the clock period.")
     st.error("❌ Timing violations detected! Attempting to fix by adjusting clock period.")
 
-    current_config = state["config"]
-    # Convert the immutable Config object to a mutable dictionary to allow modification.
-    config_dict = dict(current_config)
+    config_dict = dict(state["config"])
     current_period = float(config_dict["CLOCK_PERIOD"])
     worst_tns_ns = state["worst_tns"]
     worst_wns_ns = state["worst_wns"]
-    
-    feedback_msg = ""
-    new_period = current_period # Default to current period
+    feedback_msg, new_period = "", current_period
 
-    abs_tns = abs(worst_tns_ns)
-    if abs_tns > 500:
-        new_period = current_period * 100
-        feedback_msg = f"CRITICAL TNS violation ({worst_tns_ns:.2f} ns). Drastically increasing clock period 10x."
-        st.warning(feedback_msg)
-    elif abs_tns > 50:
-        new_period = current_period * 10
-        feedback_msg = f"HIGH TNS violation ({worst_tns_ns:.2f} ns). Increasing clock period 2x."
-        st.warning(feedback_msg)
+    if abs(worst_tns_ns) > 500:
+        new_period, feedback_msg = current_period * 10, f"CRITICAL TNS ({worst_tns_ns:.2f} ns). Drastically increasing clock period 10x."
+    elif abs(worst_tns_ns) > 50:
+        new_period, feedback_msg = current_period * 2, f"HIGH TNS ({worst_tns_ns:.2f} ns). Increasing clock period 2x."
     elif worst_tns_ns < 0:
-        new_period = current_period * 1.5
-        feedback_msg = f"Small TNS violation ({worst_tns_ns:.2f} ns). Increasing clock period 1.5x."
-        st.warning(feedback_msg)
+        new_period, feedback_msg = current_period * 1.5, f"Small TNS ({worst_tns_ns:.2f} ns). Increasing clock period 1.5x."
     elif worst_wns_ns < 0:
-        # This is the new logic: TNS is ok, but WNS is not. Make a smaller adjustment.
-        new_period = current_period * 1.15
-        feedback_msg = f"TNS is resolved, but WNS violation remains ({worst_wns_ns:.2f} ns). Slightly increasing clock period by 15%."
-        st.warning(feedback_msg)
+        new_period, feedback_msg = current_period * 1.15, f"TNS OK, but WNS violation ({worst_wns_ns:.2f} ns). Slightly increasing clock period by 15%."
 
-
+    st.warning(feedback_msg)
     st.write(f"Old Clock Period: {current_period:.2f} ns")
     st.success(f"**New Clock Period: {new_period:.2f} ns**")
 
-    # Update the clock period in our mutable dictionary.
     config_dict["CLOCK_PERIOD"] = new_period
-    
-    # Create a new, updated Config object from the modified dictionary.
-    new_config = Config(config_dict)
-
     feedback = state.get("feedback_log", []) + [f"STA Correction: {feedback_msg} Changed clock from {current_period}ns to {new_period}ns."]
-    
-    # Pass the new Config object back to the workflow.
-    return {"config": new_config, "feedback_log": feedback}
+    return {"config": Config(config_dict), "feedback_log": feedback}
 
 
 def stream_out_agent(state: AgentState) -> Dict[str, Any]:
     st.write("---")
     st.write("### 💾 Agent 22: GDSII Stream Out")
-    st.info("This agent generates the final GDSII file, a standard file format used by semiconductor foundries to manufacture the chip.")
+    st.info("This agent generates the final GDSII file for manufacturing.")
     StreamOut = Step.factory.get("KLayout.StreamOut")
     gds_step = StreamOut(config=state["config"], state_in=state["sta_state_out"])
     gds_step.start()
@@ -704,7 +711,7 @@ def stream_out_agent(state: AgentState) -> Dict[str, Any]:
 def drc_agent(state: AgentState) -> Dict[str, Any]:
     st.write("---")
     st.write("### ✅ Agent 23: Design Rule Check (DRC)")
-    st.info("This agent checks if the final layout adheres to the geometric and electrical rules defined by the foundry (the 'PDK'). This is a critical manufacturing prerequisite.")
+    st.info("This agent checks if the final layout adheres to the foundry's geometric and electrical rules.")
     DRC = Step.factory.get("Magic.DRC")
     drc_step = DRC(config=state["config"], state_in=state["stream_out_state_out"])
     drc_step.start()
@@ -724,7 +731,7 @@ def drc_agent(state: AgentState) -> Dict[str, Any]:
 def spice_extraction_agent(state: AgentState) -> Dict[str, Any]:
     st.write("---")
     st.write("### ⚡ Agent 24: SPICE Extraction")
-    st.info("This agent extracts a detailed SPICE netlist from the final layout. This netlist includes all parasitic effects and represents the 'as-built' circuit.")
+    st.info("This agent extracts a detailed SPICE netlist from the final layout.")
     SpiceExtraction = Step.factory.get("Magic.SpiceExtraction")
     spx_step = SpiceExtraction(config=state["config"], state_in=state["drc_state_out"])
     spx_step.start()
@@ -732,8 +739,8 @@ def spice_extraction_agent(state: AgentState) -> Dict[str, Any]:
 
 def lvs_agent(state: AgentState) -> Dict[str, Any]:
     st.write("---")
-    st.write("### ↔️ Agent 22: Layout vs. Schematic (LVS)")
-    st.write("Compares the extracted SPICE netlist (from the layout) against the original Verilog netlist to ensure they match.")
+    st.write("### ↔️ Agent 25: Layout vs. Schematic (LVS)")
+    st.info("Compares the extracted SPICE netlist (layout) against the original Verilog netlist.")
     LVS = Step.factory.get("Netgen.LVS")
     lvs_step = LVS(config=state["config"], state_in=state["spice_extraction_state_out"])
     lvs_step.start()
@@ -751,10 +758,189 @@ def lvs_agent(state: AgentState) -> Dict[str, Any]:
                 else: st.error(f"❌ **Final Result:** {result}")
             else: st.warning("Could not parse LVS final result.")
     except FileNotFoundError: st.warning("LVS report file not found.")
-    return {"lvs_state_out": lvs_step.state_out}
+    
+    return {
+        "lvs_state_out": lvs_step.state_out,
+        "lvs_step_dir": lvs_step.step_dir
+    }
+
+
+# --- PIN COUNTING AND REDUCTION AGENTS (Pin Counter is CORRECTED) ---
+
+def pin_counter_agent(state: AgentState) -> Dict[str, Any]:
+    st.write("---")
+    st.write("### 🔢 Agent 26: Pin Counter")
+    st.info("This agent inspects the LVS report to count the number of I/O pins.")
+    
+    lvs_step_dir = state.get("lvs_step_dir")
+    design_name = state["design_name"]
+    if not lvs_step_dir:
+        st.error("LVS step directory not found in state. Cannot count pins.")
+        return {"pin_count": -1}
+
+    json_report_path = os.path.join(lvs_step_dir, "reports", "lvs.netgen.json")
+    pin_count = 0
+
+    if not os.path.exists(json_report_path):
+        st.error(f"LVS JSON report not found at: {json_report_path}. Cannot count pins.")
+        return {"pin_count": -1}
+
+    try:
+        with open(json_report_path, 'r') as f:
+            lvs_data = json.load(f)
+            
+            # CORRECTED LOGIC: Find the dictionary for the top-level module
+            top_module_data = None
+            if isinstance(lvs_data, list):
+                for item in lvs_data:
+                    # Check if the item is a dictionary and has the 'name' key
+                    if isinstance(item, dict) and 'name' in item:
+                        # The 'name' key contains a list of two names, should be the same
+                        if item['name'][0] == design_name:
+                            top_module_data = item
+                            break
+            
+            if top_module_data:
+                pin_list = top_module_data["pins"][0]
+                # Expanded set of common power/ground pins to exclude
+                power_ground_pins = {'vccd1', 'vssd1', 'vccd', 'vssd', 'gnd', 'vdd', 'vpw', 'vnw'}
+                
+                core_pins = [p for p in pin_list if p.lower() not in power_ground_pins]
+                pin_count = len(core_pins)
+                st.success(f"✅ Successfully parsed LVS report for '{design_name}'. Found {pin_count} I/O pins.")
+            else:
+                st.error(f"Could not find pin data for top-level module '{design_name}' in the LVS JSON report.")
+                pin_count = -1
+                
+    except (json.JSONDecodeError, KeyError, IndexError) as e:
+        st.error(f"Error reading or parsing LVS JSON report: {e}")
+        pin_count = -1
+
+    st.write(f"Pin Count: **{pin_count}** / Max Allowed: **{state['max_pins']}**")
+    return {"pin_count": pin_count}
+
+
+def pin_reduction_corrector_agent(state: AgentState) -> Dict[str, Any]:
+    st.write("---")
+    st.write("### 🧠 Agent 27: Pin Reduction Corrector (LLM)")
+    st.info("This specialized agent uses an LLM to rewrite the Verilog code to reduce the number of I/O pins.")
+
+    feedback = "\n".join(state['feedback_log'])
+    st.write("#### Feedback for Correction (Pin Count):")
+    st.code(feedback, language='text')
+
+    prompt = f"""
+    You are an expert Verilog designer specializing in I/O optimization. Your task is to rewrite the given Verilog code to drastically reduce the number of input/output pins.
+    The design currently has **{state['pin_count']}** pins, but the maximum allowed is **{state['max_pins']}**.
+
+    **Feedback from Tools:**
+    {feedback}
+
+    **REQUIRED Pin Reduction Strategies (Apply one or more):**
+    1.  **Serialization (Most Important):** Convert parallel data buses into serial interfaces.
+        - For inputs, implement a **Serial-In, Parallel-Out (SIPO)** shift register. You will need to add a serial data input pin (`ser_in`) and a control signal (e.g., `load_en`).
+        - For outputs, implement a **Parallel-In, Serial-Out (PISO)** shift register. You will need a serial data output pin (`ser_out`).
+        - This will require state machines or counters to manage the shifting process over multiple clock cycles.
+    2.  **Multiplexing:** Use a smaller number of shared data lines with selection bits to choose which internal signal is being driven or read.
+    3.  **Encoding:** If there are multiple single-bit inputs/outputs that are mutually exclusive, encode them. For example, 8 one-hot signals can be replaced by a 3-bit binary signal.
+    4.  **Use a Standard Protocol (Advanced):** If applicable, implement a simple SPI-like interface with `sclk`, `mosi`, `miso`, and `cs` pins.
+
+    **RULES:**
+    - You MUST modify the top-level module's port list.
+    - The new logic MUST be functionally equivalent to the old logic, just with a different I/O method.
+    - You MUST generate pure, synthesizable Verilog-2001 compatible code.
+    - Combine all Verilog modules into a single, monolithic block of code.
+    - Do NOT include the testbench.
+    - Your output MUST be only the Verilog code, enclosed in a single markdown block.
+
+    **Original Verilog Code:**
+    ---
+    """
+    code_to_correct = state.get("decomposed_files")
+    for filename, code in code_to_correct.items():
+        prompt += f"--- {filename} ---\n{code}\n"
+    prompt += "---"
+
+    st.write("🤖 Asking Gemini to optimize the Verilog code for Pin Reduction...")
+    response = llm.invoke(prompt)
+    st.write("#### Gemini's Raw Response:")
+    st.markdown(response.content)
+
+    modified_code_match = re.search(r"```(?:verilog)?\s*\n(.*?)```", response.content, re.DOTALL)
+    if not modified_code_match:
+        st.error("LLM response parsing failed. Could not find a valid Verilog code block. Falling back.")
+        return {"modified_verilog_code": "\n".join(code_to_correct.values())}
+
+    modified_verilog_code = modified_code_match.group(1).strip()
+    st.success("✅ Successfully extracted pin-optimized Verilog code from LLM response.")
+    return {"modified_verilog_code": modified_verilog_code}
+
+def pin_reduction_testbench_agent(state: AgentState) -> Dict[str, Any]:
+    st.write("---")
+    st.write("### 🧠 Agent 28: Pin Reduction Testbench Corrector (LLM)")
+    st.info("This agent rewrites the testbench to work with the new, pin-reduced (likely serial) I/O of the design.")
+
+    if not state.get("original_testbench_code"):
+        return {}
+
+    prompt = f"""
+    You are an expert Verilog testbench writer. The design under test has just been significantly modified to reduce its I/O pin count.
+    This means parallel buses have likely been replaced with serial interfaces (e.g., using shift registers).
+    Your task is to rewrite the original testbench to correctly drive and verify this new serial interface.
+
+    **Key Tasks:**
+    - Analyze the new design's module definition to understand the new ports (`ser_in`, `ser_out`, control signals, etc.).
+    - Modify the testbench stimulus generation. Instead of assigning a parallel value in one step, you must now create a loop or task to shift in data bit-by-bit over multiple clock cycles.
+    - Modify the verification logic to capture serial output data and reconstruct it for comparison against expected values.
+
+    **New Design Modules:**
+    ---
+    """
+    for filename, code in state['decomposed_files'].items():
+        prompt += f"--- {filename} ---\n{code}\n"
+
+    prompt += f"""
+    ---
+    **Original Testbench Code (for the old parallel design):**
+    ---
+    {state['original_testbench_code']}
+    ---
+    Provide the updated, complete, and corrected testbench code in a single Verilog code block. It MUST correctly interact with the new serial interface.
+    """
+
+    st.write("🤖 Asking Gemini to create a new testbench for the pin-reduced design...")
+    response = llm.invoke(prompt)
+    st.write("#### Gemini's Response:")
+    st.markdown(response.content)
+
+    modified_code = re.search(r"```(?:verilog)?\s*\n(.*?)```", response.content, re.DOTALL)
+    if not modified_code:
+        st.error("Could not extract corrected testbench code from LLM response.")
+        return {"modified_testbench_code": state['original_testbench_code']}
+
+    corrected_tb_code = modified_code.group(1).strip()
+    st.success("✅ Successfully generated new testbench for pin-reduced design.")
+    return {"modified_testbench_code": corrected_tb_code}
+
+
+def pin_reduction_decomposer_agent(state: AgentState) -> Dict[str, Any]:
+    # This agent can be the same as the original decomposer, but we create a new node for clarity in the graph
+    st.write("---")
+    st.write("### 🧩 Agent 29: Pin Reduction Code Decomposer")
+    st.info("Splitting the pin-reduced Verilog back into separate files.")
+    return code_decomposer_agent(state)
+
+def pin_reduction_saver_agent(state: AgentState) -> Dict[str, Any]:
+    # This agent can be the same as the original saver, but we create a new node for clarity
+    st.write("---")
+    st.write("### 💾 Agent 30: Pin Reduction File Saver")
+    st.info("Saving the pin-reduced Verilog and new testbench to a new versioned directory.")
+    # Reset modified testbench code to ensure the new one is picked up
+    state['modified_testbench_code'] = state.get('modified_testbench_code')
+    return file_saver_agent(state)
+
 
 def render_step_image(state: AgentState, state_key_in: str, caption: str):
-    # This function now uses use_container_width as requested
     st.write(f"#### 🖼️ Visualizing: {caption}")
     Render = Step.factory.get("KLayout.Render")
     render_step = Render(config=state["config"], state_in=state[state_key_in])
@@ -774,9 +960,9 @@ def check_simulation(state: AgentState) -> str:
         return "continue_to_synthesis"
     else:
         st.error("❌ Simulation Failed.")
-        feedback = state.get("feedback_log", []) + [f"Icarus simulation failed. Please examine the following error and fix the Verilog code:\n{state['simulation_output']}"]
+        feedback = state.get("feedback_log", []) + [f"Icarus simulation failed. Fix the Verilog code:\n{state['simulation_output']}"]
         state['feedback_log'] = feedback
-        if state.get("update_attempt", 0) > 5: # Limit attempts
+        if state.get("update_attempt", 0) > 5:
             st.error("Simulation failed after multiple correction attempts. Halting.")
             return "end"
         st.warning("Looping back to Verilog Corrector for another attempt.")
@@ -791,45 +977,82 @@ def check_floorplan(state: AgentState) -> str:
         return "continue_to_pnr"
     else:
         st.error("❌ Die size exceeds maximum limits.")
-        feedback = state.get("feedback_log", []) + [f"Floorplan failed. Die size {state['die_width_mm']:.3f}x{state['die_height_mm']:.3f}mm exceeds limit of {state['max_die_width_mm']:.3f}x{state['max_die_height_mm']:.3f}mm. Please simplify the design to reduce its area."]
+        feedback = state.get("feedback_log", []) + [f"Floorplan failed. Die size {state['die_width_mm']:.3f}x{state['die_height_mm']:.3f}mm exceeds limit. Simplify the design to reduce area."]
         state['feedback_log'] = feedback
-        if state.get("update_attempt", 0) > 10: # Limit attempts
+        if state.get("update_attempt", 0) > 10:
             st.error("Die size too large after multiple correction attempts. Halting.")
             return "end"
         return "fix_verilog"
 
 def check_sta_violations(state: AgentState) -> str:
-    # Updated logic to check both TNS and WNS
     worst_tns = state.get("worst_tns", 0.0)
     worst_wns = state.get("worst_wns", 0.0)
     if worst_tns < 0 or worst_wns < 0:
-        st.error(f"❌ STA VIOLATION DETECTED (TNS={worst_tns:.2f} ns, WNS={worst_wns:.2f} ns).")
-        if state.get("update_attempt", 0) > 5: # Limit STA loops
+        st.error(f"❌ STA VIOLATION (TNS={worst_tns:.2f} ns, WNS={worst_wns:.2f} ns).")
+        if state.get("update_attempt", 0) > 15:
              st.error("Could not meet timing after multiple attempts. Halting.")
              return "end"
         return "fix_sta"
     else:
-        st.success(f"✅ Timing constraints met (TNS={worst_tns:.2f} ns, WNS={worst_wns:.2f} ns). Proceeding to final signoff.")
+        st.success(f"✅ Timing constraints met. Proceeding to final signoff.")
         return "continue_to_signoff"
 
+def check_pin_count(state: AgentState) -> str:
+    if state["pin_count"] < 0: # Error case
+        st.error("Halting due to pin counting error.")
+        return "end"
+    if state["pin_count"] <= state["max_pins"]:
+        st.success("✅ Pin count is within limits. Flow complete!")
+        return "end"
+    else:
+        st.error(f"❌ Pin count ({state['pin_count']}) exceeds maximum of {state['max_pins']}.")
+        feedback = state.get("feedback_log", []) + [f"LVS passed, but pin count {state['pin_count']} exceeds limit of {state['max_pins']}. You must reduce the number of I/O ports using serialization or other techniques."]
+        state['feedback_log'] = feedback
+        if state.get("update_attempt", 0) > 20:
+             st.error("Could not meet pin count constraint after multiple attempts. Halting.")
+             return "end"
+        st.warning("Looping back to Verilog Pin Reduction Corrector.")
+        return "fix_pins"
 
 # --- Build the graph ---
 workflow = StateGraph(AgentState)
 
 # Add Nodes
 node_definitions = {
-    "file_processing": file_processing_agent, "verilog_corrector": verilog_corrector_agent,
-    "code_decomposer": code_decomposer_agent, "testbench_corrector": testbench_corrector_agent,
-    "file_saver": file_saver_agent, "icarus_simulation": icarus_simulation_agent,
-    "setup": setup_agent, "synthesis": synthesis_agent, "floorplan": floorplan_agent,
-    "tap_endcap": tap_endcap_agent, "io_placement": io_placement_agent,
-    "generate_pdn": generate_pdn_agent, "global_placement": global_placement_agent,
-    "detailed_placement": detailed_placement_agent, "cts": cts_agent,
-    "global_routing": global_routing_agent, "detailed_routing": detailed_routing_agent,
-    "fill_insertion": fill_insertion_agent, "rcx": rcx_agent, "sta": sta_agent,
-    "sta_correction": sta_correction_agent, "stream_out": stream_out_agent,
-    "drc": drc_agent, "spice_extraction": spice_extraction_agent, "lvs": lvs_agent,
-    # --- ADDED: Visualization nodes for every stage ---
+    "file_processing": file_processing_agent,
+    "icarus_simulation": icarus_simulation_agent,
+    "setup": setup_agent,
+    "synthesis": synthesis_agent,
+    "floorplan": floorplan_agent,
+    "tap_endcap": tap_endcap_agent,
+    "io_placement": io_placement_agent,
+    "generate_pdn": generate_pdn_agent,
+    "global_placement": global_placement_agent,
+    "detailed_placement": detailed_placement_agent,
+    "cts": cts_agent,
+    "global_routing": global_routing_agent,
+    "detailed_routing": detailed_routing_agent,
+    "fill_insertion": fill_insertion_agent,
+    "rcx": rcx_agent,
+    "sta": sta_agent,
+    "sta_correction": sta_correction_agent,
+    "stream_out": stream_out_agent,
+    "drc": drc_agent,
+    "spice_extraction": spice_extraction_agent,
+    "lvs": lvs_agent,
+    # Area/Sim correction loop
+    "verilog_corrector": verilog_corrector_agent,
+    "code_decomposer": code_decomposer_agent,
+    "design_name_updater": design_name_updater_agent, # <-- ADDED NEW AGENT
+    "testbench_corrector": testbench_corrector_agent,
+    "file_saver": file_saver_agent,
+    # Pin reduction loop
+    "pin_counter": pin_counter_agent,
+    "pin_reduction_corrector": pin_reduction_corrector_agent,
+    "pin_reduction_decomposer": pin_reduction_decomposer_agent,
+    "pin_reduction_testbench": pin_reduction_testbench_agent,
+    "pin_reduction_saver": pin_reduction_saver_agent,
+    # Visualization nodes
     "render_floorplan": lambda s: render_step_image(s, "floorplan_state_out", "Floorplan Layout"),
     "render_tap_endcap": lambda s: render_step_image(s, "tap_endcap_state_out", "Tap/Endcap Insertion"),
     "render_io": lambda s: render_step_image(s, "io_placement_state_out", "I/O Placement"),
@@ -844,19 +1067,18 @@ node_definitions = {
 for name, func in node_definitions.items():
     workflow.add_node(name, func)
 
-# Define Edges
+# --- Define Edges ---
 workflow.add_edge(START, "file_processing")
 workflow.add_edge("file_processing", "icarus_simulation")
 
 # Conditional Edge 1: Simulation Check
-workflow.add_conditional_edges(
-    "icarus_simulation", check_simulation,
-    {"continue_to_synthesis": "setup", "fix_verilog": "verilog_corrector", "end": END}
-)
+workflow.add_conditional_edges("icarus_simulation", check_simulation,
+    {"continue_to_synthesis": "setup", "fix_verilog": "verilog_corrector", "end": END})
 
-# Correction Loop 1: Verilog/LLM fix
+# Correction Loop 1: Verilog Area/Sim Fix
 workflow.add_edge("verilog_corrector", "code_decomposer")
-workflow.add_edge("code_decomposer", "testbench_corrector")
+workflow.add_edge("code_decomposer", "design_name_updater") # <-- FIX: Insert updater
+workflow.add_edge("design_name_updater", "testbench_corrector")
 workflow.add_edge("testbench_corrector", "file_saver")
 workflow.add_edge("file_saver", "icarus_simulation") # Loop back to re-verify
 
@@ -866,32 +1088,24 @@ workflow.add_edge("synthesis", "floorplan")
 workflow.add_edge("floorplan", "render_floorplan")
 
 # Conditional Edge 2: Floorplan/Area Check
-workflow.add_conditional_edges(
-    "render_floorplan", check_floorplan,
-    {"continue_to_pnr": "tap_endcap", "fix_verilog": "verilog_corrector", "end": END}
-)
+workflow.add_conditional_edges("render_floorplan", check_floorplan,
+    {"continue_to_pnr": "tap_endcap", "fix_verilog": "verilog_corrector", "end": END})
 
-# --- UPDATED: PNR Chain with all visualization steps ---
-pnr_chain = [
-    "tap_endcap", "render_tap_endcap", "io_placement", "render_io",
-    "generate_pdn", "render_pdn", "global_placement", "render_global_placement",
-    "detailed_placement", "render_detailed_placement", "cts", "render_cts",
-    "global_routing", "detailed_routing", "render_routing"
-]
+# PNR Chain
+pnr_chain = ["tap_endcap", "render_tap_endcap", "io_placement", "render_io", "generate_pdn", "render_pdn",
+             "global_placement", "render_global_placement", "detailed_placement", "render_detailed_placement",
+             "cts", "render_cts", "global_routing", "detailed_routing", "render_routing"]
 for i in range(len(pnr_chain) - 1):
     workflow.add_edge(pnr_chain[i], pnr_chain[i+1])
 
-# Post-PNR -> STA
 workflow.add_edge("render_routing", "fill_insertion")
 workflow.add_edge("fill_insertion", "render_fill")
 workflow.add_edge("render_fill", "rcx")
 workflow.add_edge("rcx", "sta")
 
 # Conditional Edge 3: STA/Timing Check
-workflow.add_conditional_edges(
-    "sta", check_sta_violations,
-    {"continue_to_signoff": "stream_out", "fix_sta": "sta_correction", "end": END}
-)
+workflow.add_conditional_edges("sta", check_sta_violations,
+    {"continue_to_signoff": "stream_out", "fix_sta": "sta_correction", "end": END})
 
 # Correction Loop 2: STA/Timing fix
 workflow.add_edge("sta_correction", "setup") # Loop back to setup with new config
@@ -901,14 +1115,24 @@ signoff_chain = ["stream_out", "render_gds", "drc", "spice_extraction", "lvs"]
 for i in range(len(signoff_chain) - 1):
     workflow.add_edge(signoff_chain[i], signoff_chain[i+1])
 
-workflow.add_edge("lvs", END)
+# Conditional Edge 4: Pin Count Check
+workflow.add_edge("lvs", "pin_counter")
+workflow.add_conditional_edges("pin_counter", check_pin_count,
+    {"fix_pins": "pin_reduction_corrector", "end": END})
+
+# Correction Loop 3: Pin Reduction Fix
+workflow.add_edge("pin_reduction_corrector", "pin_reduction_decomposer")
+workflow.add_edge("pin_reduction_decomposer", "design_name_updater") # <-- FIX: Insert updater
+# The name updater will flow into the testbench corrector
+workflow.add_edge("pin_reduction_testbench", "pin_reduction_saver")
+workflow.add_edge("pin_reduction_saver", "icarus_simulation") # Loop all the way back to the start
 
 app = workflow.compile()
 
 # --- Streamlit UI ---
 st.set_page_config(layout="wide")
 st.title("🤖 LLM for Chip Design Automation")
-st.write("This application uses a multi-agent workflow to automate the digital chip design flow, from RTL to GDSII. It includes intelligent feedback loops to correct functional, area, and timing violations.")
+st.write("This application uses a multi-agent workflow to automate the digital chip design flow, from RTL to GDSII. It includes intelligent feedback loops to correct functional, area, timing, and I/O pin count violations.")
 
 st.sidebar.header("1. Upload Your Files")
 uploaded_files = st.sidebar.file_uploader(
@@ -926,6 +1150,7 @@ if uploaded_files:
         st.sidebar.header("2. Set Constraints")
         max_w = st.sidebar.number_input("Max Die Width (mm)", min_value=0.01, value=0.8, step=0.01, format="%.3f")
         max_h = st.sidebar.number_input("Max Die Height (mm)", min_value=0.01, value=0.8, step=0.01, format="%.3f")
+        max_p = st.sidebar.number_input("Max I/O Pins", min_value=4, value=30, step=1)
 
         if st.sidebar.button("🚀 Run Agentic Flow"):
             if not llm:
@@ -939,9 +1164,9 @@ if uploaded_files:
                             "top_level_module": top_level_module,
                             "max_die_width_mm": max_w,
                             "max_die_height_mm": max_h,
+                            "max_pins": max_p,
                         }
-                        # The recursion limit is increased to handle the potential loops in the graph.
-                        app.invoke(initial_state, {"recursion_limit": 150})
+                        app.invoke(initial_state, {"recursion_limit": 200})
                     st.success("✅ Agentic flow completed!")
                 except Exception as e:
                     st.error(f"An error occurred during the flow: {e}")
@@ -960,74 +1185,77 @@ digraph G {
     edge [fontname="sans-serif", fontsize=8];
 
     subgraph cluster_prep {
-        label="1. Pre-Processing & Verification";
-        style="rounded,filled";
-        color="#e3f2fd";
-        node[fillcolor="#bbdefb"];
+        label="1. Pre-Processing & Verification"; style="rounded,filled"; color="#e3f2fd"; node[fillcolor="#bbdefb"];
         file_processing [label="1. File Processing"];
         icarus_simulation [label="6. Icarus Simulation", shape=diamond, style="rounded,filled", fillcolor="#fff9c4"];
     }
 
     subgraph cluster_correction_verilog {
-        label="A. Verilog Correction Loop";
-        style="rounded,filled";
-        color="#ffebee";
-        node[fillcolor="#ffcdd2"];
-        verilog_corrector [label="2. Verilog Corrector (LLM)"];
-        code_decomposer [label="3. Code Decomposer (LLM)"];
-        testbench_corrector [label="4. Testbench Corrector (LLM)"];
+        label="A. Area/Sim Correction Loop"; style="rounded,filled"; color="#ffebee"; node[fillcolor="#ffcdd2"];
+        verilog_corrector [label="2. Verilog Area/Sim Corrector"];
+        code_decomposer [label="3. Code Decomposer"];
+        design_name_updater [label="3.5. Design Name Updater", shape=septagon, style=filled, fillcolor="#f8bbd0"];
+        testbench_corrector [label="4. Testbench Corrector"];
         file_saver [label="5. File Saver"];
     }
 
     subgraph cluster_pnr {
-        label="2. Physical Design (PnR) & Timing";
-        style="rounded,filled";
-        color="#e8f5e9";
-        node[fillcolor="#c8e6c9"];
+        label="2. Physical Design (PnR) & Timing"; style="rounded,filled"; color="#e8f5e9"; node[fillcolor="#c8e6c9"];
         setup [label="7. OpenLane Setup"];
         synthesis [label="8. Synthesis"];
         floorplan [label="9. Floorplan", shape=diamond, style="rounded,filled", fillcolor="#fff9c4"];
-        pnr_group [label="PnR & Vis Steps (10-19)", shape=box3d, style=filled, fillcolor="#a5d6a7"];
+        pnr_group [label="PnR & Vis Steps (10-19)"];
         sta [label="20. Static Timing Analysis", shape=diamond, style="rounded,filled", fillcolor="#fff9c4"];
     }
 
     subgraph cluster_correction_sta {
-        label="B. Timing Correction Loop";
-        style="rounded,filled";
-        color="#fff3e0";
-        node[fillcolor="#ffe0b2"];
+        label="B. Timing Correction Loop"; style="rounded,filled"; color="#fff3e0"; node[fillcolor="#ffe0b2"];
         sta_correction [label="21. STA Corrector"];
     }
 
     subgraph cluster_signoff {
-        label="3. Final Signoff";
-        style="rounded,filled";
-        color="#f3e5f5";
-        node[fillcolor="#e1bee7", width=1.8, height=0.4];
+        label="3. Final Signoff"; style="rounded,filled"; color="#f3e5f5"; node[fillcolor="#e1bee7"];
         stream_out [label="22. GDSII Stream Out"];
         drc [label="23. DRC"];
         spice_extraction [label="24. SPICE Extraction"];
         lvs [label="25. LVS"];
+        pin_counter [label="26. Pin Counter", shape=diamond, style="rounded,filled", fillcolor="#fff9c4"];
     }
     
+    subgraph cluster_correction_pins {
+        label="C. Pin Reduction Loop"; style="rounded,filled"; color="#dcedc8"; node[fillcolor="#c5e1a5"];
+        pin_reduction_corrector [label="27. Pin Reduction Corrector"];
+        pin_reduction_decomposer [label="28. Pin Reduction Decomposer"];
+        pin_reduction_testbench [label="29. Pin Reduction Testbench Agent"];
+        pin_reduction_saver [label="30. Pin Reduction Saver"];
+    }
+
     end_node [label="Flow Complete", shape=ellipse, style=filled, fillcolor="#b2dfdb"];
 
-    // Main Flow Edges
+    // Main Flow
     file_processing -> icarus_simulation;
-    icarus_simulation -> setup [label="Sim OK", color=darkgreen, fontcolor=darkgreen, style=bold];
+    icarus_simulation -> setup [label=" Sim OK", color=darkgreen, fontcolor=darkgreen];
     setup -> synthesis -> floorplan;
-    floorplan -> pnr_group [label="Area OK", color=darkgreen, fontcolor=darkgreen, style=bold];
+    floorplan -> pnr_group [label=" Area OK", color=darkgreen, fontcolor=darkgreen];
     pnr_group -> sta;
-    sta -> stream_out [label="Timing OK", color=darkgreen, fontcolor=darkgreen, style=bold];
-    stream_out -> drc -> spice_extraction -> lvs -> end_node;
+    sta -> stream_out [label=" Timing OK", color=darkgreen, fontcolor=darkgreen];
+    stream_out -> drc -> spice_extraction -> lvs -> pin_counter;
+    pin_counter -> end_node [label=" Pins OK", color=darkgreen, fontcolor=darkgreen, style=bold];
 
-    // Correction Loop 1: Verilog Fix (Red)
-    icarus_simulation -> verilog_corrector [label=" Sim FAIL", style=dashed, color=red, constraint=false, fontcolor=red];
-    floorplan -> verilog_corrector [label=" Area TOO BIG", style=dashed, color=red, constraint=false, fontcolor=red];
-    verilog_corrector -> code_decomposer -> testbench_corrector -> file_saver -> icarus_simulation [style=dashed, color=red, arrowhead=normal, label="   Re-verify"];
+    // Loop 1: Verilog Fix (Red)
+    icarus_simulation -> verilog_corrector [label=" Sim FAIL", style=dashed, color=red, fontcolor=red, constraint=false];
+    floorplan -> verilog_corrector [label=" Area TOO BIG", style=dashed, color=red, fontcolor=red, constraint=false];
+    verilog_corrector -> code_decomposer -> design_name_updater -> testbench_corrector -> file_saver -> icarus_simulation [style=dashed, color=red, arrowhead=normal];
 
-    // Correction Loop 2: STA Fix (Blue)
-    sta -> sta_correction [label=" Timing FAIL", style=dashed, color=blue, constraint=false, fontcolor=blue];
+    // Loop 2: STA Fix (Blue)
+    sta -> sta_correction [label=" Timing FAIL", style=dashed, color=blue, fontcolor=blue, constraint=false];
     sta_correction -> setup [style=dashed, color=blue, arrowhead=normal, label=" Re-run PnR w/ new clock"];
+    
+    // Loop 3: Pin Reduction (Dark Orange)
+    pin_counter -> pin_reduction_corrector [label=" Too Many Pins", style=dashed, color="#E65100", fontcolor="#E65100", constraint=false];
+    pin_reduction_corrector -> pin_reduction_decomposer;
+    pin_reduction_decomposer -> design_name_updater [style=dashed, color="#E65100"]; // Reuse updater
+    // The existing edge from design_name_updater to testbench_corrector works for both loops
+    pin_reduction_testbench -> pin_reduction_saver -> icarus_simulation [style=dashed, color="#E65100", arrowhead=normal, label="Re-verify new I/O"];
 }
 """)

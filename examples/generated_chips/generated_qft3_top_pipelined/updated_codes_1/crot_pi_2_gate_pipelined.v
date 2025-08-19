@@ -1,14 +1,7 @@
 `include "fixed_point_params.vh"
-
 //======================================================================
 // Optimized CROT Gate for theta = pi/2 (Pipelined)
 //======================================================================
-// This module replaces the generic complex multiplier for rotations by pi/2.
-// It implements multiplication by (0 + 1j), which simplifies to:
-// (ar + ai*j) * (0 + 1j) = -ai + ar*j
-// So, pr = -ai and pi = ar.
-// This saves four multipliers and two adders compared to the generic version.
-// Latency: 3 cycles (to match other gates)
 module crot_pi_2_gate_pipelined(
     input                         clk,
     input                         rst_n,

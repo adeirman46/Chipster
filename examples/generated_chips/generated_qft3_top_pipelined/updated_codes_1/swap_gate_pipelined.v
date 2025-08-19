@@ -1,9 +1,7 @@
 `include "fixed_point_params.vh"
-
 //======================================================================
 // SWAP Gate (Pipelined)
 //======================================================================
-// Latency: 1 cycle
 module swap_gate_pipelined(
     input                         clk,
     input                         rst_n,

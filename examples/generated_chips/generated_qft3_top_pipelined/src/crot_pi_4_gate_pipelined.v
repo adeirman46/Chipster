@@ -16,12 +16,13 @@ module crot_pi_4_gate_pipelined(
     input  signed [`TOTAL_WIDTH-1:0] ar, ai,
     output signed [`TOTAL_WIDTH-1:0] pr, pi
 );
-    // Constant for ~0.707 (1/sqrt(2)) in S4.4 format
+    // Constant for ~0.707 (1/sqrt(2)) in S1.4 format (0.6875)
+    // Same interpretation as ONE_OVER_SQRT2 in h_gate_simplified.
     localparam signed [`TOTAL_WIDTH-1:0] C_VAL = 11;
 
     // Intermediate widths
     localparam CROT_ADD_WIDTH = `ADD_WIDTH;
-    localparam CROT_MULT_WIDTH = CROT_ADD_WIDTH + `TOTAL_WIDTH;
+    localparam CROT_MULT_WIDTH = `MULT_RESULT_WIDTH;
 
     // Stage 1: Addition/Subtraction
     reg signed [CROT_ADD_WIDTH-1:0] sub_s1, add_s1;
@@ -35,15 +36,16 @@ module crot_pi_4_gate_pipelined(
         end
     end
 
-    // Stage 2: Multiplication by constant
+    // Stage 2: Multiplication by constant using operator strength reduction
     reg signed [CROT_MULT_WIDTH-1:0] pr_prod_s2, pi_prod_s2;
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             pr_prod_s2 <= 0;
             pi_prod_s2 <= 0;
         end else begin
-            pr_prod_s2 <= sub_s1 * C_VAL;
-            pi_prod_s2 <= add_s1 * C_VAL;
+            // Replacement of X * 11 with (X << 3) + (X << 1) + X
+            pr_prod_s2 <= (sub_s1 << 3) + (sub_s1 << 1) + sub_s1;
+            pi_prod_s2 <= (add_s1 << 3) + (add_s1 << 1) + add_s1;
         end
     end
     

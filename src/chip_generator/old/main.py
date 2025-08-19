@@ -22,10 +22,11 @@ load_dotenv()
 # Make sure you have GOOGLE_API_KEY in your .env file
 try:
     # Using a powerful model suitable for code generation and analysis
-    llm = ChatGoogleGenerativeAI(model="gemini-2.5-pro")
+    llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash")
 except Exception as e:
     st.error(f"Error initializing Gemini LLM: {e}. Make sure your GOOGLE_API_KEY is set in a .env file.")
     llm = None
+
 
 # --- Agentic Workflow State ---
 class AgentState(TypedDict):
@@ -81,7 +82,7 @@ def file_processing_agent(state: AgentState) -> Dict[str, Any]:
     top_level_module = state["top_level_module"]
     design_name = top_level_module
 
-    run_path = os.path.abspath(os.path.join("..", "..", "examples", "generated_chips", f"generated_{design_name}"))
+    run_path = os.path.abspath(os.path.join("..", "..", "..", "examples", "generated_chips", f"generated_{design_name}"))
     if os.path.exists(run_path):
         shutil.rmtree(run_path)
     os.makedirs(run_path, exist_ok=True)

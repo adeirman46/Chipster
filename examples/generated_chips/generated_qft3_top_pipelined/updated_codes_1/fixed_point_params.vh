@@ -1,6 +1,7 @@
-// fixed_point_params.vh
-// Defines the fixed-point data type for the QFT project.
-//
+//======================================================================
+// PARAMETER DEFINITIONS
+//======================================================================
+
 // Total bits for our signed fixed-point number
 `define TOTAL_WIDTH 6
 // Number of fractional bits

@@ -36,39 +36,69 @@ module qft3_top_pipelined(
     crot_pi_2_gate_pipelined c21_p0 (.clk(clk), .rst_n(rst_n), .ar(s1_r[6]), .ai(s1_i[6]), .pr(s2_r[6]), .pi(s2_i[6]));
     crot_pi_2_gate_pipelined c21_p1 (.clk(clk), .rst_n(rst_n), .ar(s1_r[7]), .ai(s1_i[7]), .pr(s2_r[7]), .pi(s2_i[7]));
     // Pass-through s1[0..5] with 3-cycle delay
-    reg signed [`TOTAL_WIDTH-1:0] s1_passthru_s2_r [0:5][0:2], s1_passthru_s2_i [0:5][0:2];
+    reg signed [`TOTAL_WIDTH-1:0] s1_passthru_s2_r [0:5][0:2];
+    reg signed [`TOTAL_WIDTH-1:0] s1_passthru_s2_i [0:5][0:2];
     always @(posedge clk or negedge rst_n) begin
-        if(!rst_n) for(j=0;j<6;j=j+1) for(i=0;i<3;i=i+1) {s1_passthru_s2_r[j][i],s1_passthru_s2_i[j][i]} <= 0;
-        else for(j=0;j<6;j=j+1) begin
-            {s1_passthru_s2_r[j][0],s1_passthru_s2_i[j][0]} <= {s1_r[j],s1_i[j]};
-            {s1_passthru_s2_r[j][1],s1_passthru_s2_i[j][1]} <= {s1_passthru_s2_r[j][0],s1_passthru_s2_i[j][0]};
-            {s1_passthru_s2_r[j][2],s1_passthru_s2_i[j][2]} <= {s1_passthru_s2_r[j][1],s1_passthru_s2_i[j][1]};
+        if(!rst_n) begin
+            for(j=0;j<6;j=j+1) begin
+                for(i=0;i<3;i=i+1) begin
+                    s1_passthru_s2_r[j][i] <= 0;
+                    s1_passthru_s2_i[j][i] <= 0;
+                end
+            end
+        end else begin
+            for(j=0;j<6;j=j+1) begin
+                s1_passthru_s2_r[j][0] <= s1_r[j];
+                s1_passthru_s2_i[j][0] <= s1_i[j];
+                s1_passthru_s2_r[j][1] <= s1_passthru_s2_r[j][0];
+                s1_passthru_s2_i[j][1] <= s1_passthru_s2_i[j][0];
+                s1_passthru_s2_r[j][2] <= s1_passthru_s2_r[j][1];
+                s1_passthru_s2_i[j][2] <= s1_passthru_s2_i[j][1];
+            end
         end
     end
-    assign {s2_r[0],s2_i[0]}={s1_passthru_s2_r[0][2],s1_passthru_s2_i[0][2]}; assign {s2_r[1],s2_i[1]}={s1_passthru_s2_r[1][2],s1_passthru_s2_i[1][2]};
-    assign {s2_r[2],s2_i[2]}={s1_passthru_s2_r[2][2],s1_passthru_s2_i[2][2]}; assign {s2_r[3],s2_i[3]}={s1_passthru_s2_r[3][2],s1_passthru_s2_i[3][2]};
-    assign {s2_r[4],s2_i[4]}={s1_passthru_s2_r[4][2],s1_passthru_s2_i[4][2]}; assign {s2_r[5],s2_i[5]}={s1_passthru_s2_r[5][2],s1_passthru_s2_i[5][2]};
+    assign s2_r[0]=s1_passthru_s2_r[0][2]; assign s2_i[0]=s1_passthru_s2_i[0][2];
+    assign s2_r[1]=s1_passthru_s2_r[1][2]; assign s2_i[1]=s1_passthru_s2_i[1][2];
+    assign s2_r[2]=s1_passthru_s2_r[2][2]; assign s2_i[2]=s1_passthru_s2_i[2][2];
+    assign s2_r[3]=s1_passthru_s2_r[3][2]; assign s2_i[3]=s1_passthru_s2_i[3][2];
+    assign s2_r[4]=s1_passthru_s2_r[4][2]; assign s2_i[4]=s1_passthru_s2_i[4][2];
+    assign s2_r[5]=s1_passthru_s2_r[5][2]; assign s2_i[5]=s1_passthru_s2_i[5][2];
 
     // --- STAGE 3: CROT(π/4) from q0 to q2 --- Latency: 3 ---
     crot_pi_4_gate_pipelined c20_p0 (.clk(clk), .rst_n(rst_n), .ar(s2_r[5]), .ai(s2_i[5]), .pr(s3_r[5]), .pi(s3_i[5]));
     crot_pi_4_gate_pipelined c20_p1 (.clk(clk), .rst_n(rst_n), .ar(s2_r[7]), .ai(s2_i[7]), .pr(s3_r[7]), .pi(s3_i[7]));
     // Pass-through s2[0..4] and s2[6] with 3-cycle delay
-    reg signed [`TOTAL_WIDTH-1:0] s2_passthru_s3_r [0:5][0:2], s2_passthru_s3_i [0:5][0:2];
+    reg signed [`TOTAL_WIDTH-1:0] s2_passthru_s3_r [0:5][0:2];
+    reg signed [`TOTAL_WIDTH-1:0] s2_passthru_s3_i [0:5][0:2];
     always @(posedge clk or negedge rst_n) begin
-        if(!rst_n) for(j=0;j<6;j=j+1) for(i=0;i<3;i=i+1) {s2_passthru_s3_r[j][i],s2_passthru_s3_i[j][i]} <= 0;
-        else begin
-            {s2_passthru_s3_r[0][0],s2_passthru_s3_i[0][0]} <= {s2_r[0],s2_i[0]}; {s2_passthru_s3_r[1][0],s2_passthru_s3_i[1][0]} <= {s2_r[1],s2_i[1]};
-            {s2_passthru_s3_r[2][0],s2_passthru_s3_i[2][0]} <= {s2_r[2],s2_i[2]}; {s2_passthru_s3_r[3][0],s2_passthru_s3_i[3][0]} <= {s2_r[3],s2_i[3]};
-            {s2_passthru_s3_r[4][0],s2_passthru_s3_i[4][0]} <= {s2_r[4],s2_i[4]}; {s2_passthru_s3_r[5][0],s2_passthru_s3_i[5][0]} <= {s2_r[6],s2_i[6]};
+        if(!rst_n) begin
             for(j=0;j<6;j=j+1) begin
-                {s2_passthru_s3_r[j][1],s2_passthru_s3_i[j][1]} <= {s2_passthru_s3_r[j][0],s2_passthru_s3_i[j][0]};
-                {s2_passthru_s3_r[j][2],s2_passthru_s3_i[j][2]} <= {s2_passthru_s3_r[j][1],s2_passthru_s3_i[j][1]};
+                for(i=0;i<3;i=i+1) begin
+                    s2_passthru_s3_r[j][i] <= 0;
+                    s2_passthru_s3_i[j][i] <= 0;
+                end
+            end
+        end else begin
+            s2_passthru_s3_r[0][0] <= s2_r[0]; s2_passthru_s3_i[0][0] <= s2_i[0];
+            s2_passthru_s3_r[1][0] <= s2_r[1]; s2_passthru_s3_i[1][0] <= s2_i[1];
+            s2_passthru_s3_r[2][0] <= s2_r[2]; s2_passthru_s3_i[2][0] <= s2_i[2];
+            s2_passthru_s3_r[3][0] <= s2_r[3]; s2_passthru_s3_i[3][0] <= s2_i[3];
+            s2_passthru_s3_r[4][0] <= s2_r[4]; s2_passthru_s3_i[4][0] <= s2_i[4];
+            s2_passthru_s3_r[5][0] <= s2_r[6]; s2_passthru_s3_i[5][0] <= s2_i[6];
+            for(j=0;j<6;j=j+1) begin
+                s2_passthru_s3_r[j][1] <= s2_passthru_s3_r[j][0];
+                s2_passthru_s3_i[j][1] <= s2_passthru_s3_i[j][0];
+                s2_passthru_s3_r[j][2] <= s2_passthru_s3_r[j][1];
+                s2_passthru_s3_i[j][2] <= s2_passthru_s3_i[j][1];
             end
         end
     end
-    assign {s3_r[0],s3_i[0]}={s2_passthru_s3_r[0][2],s2_passthru_s3_i[0][2]}; assign {s3_r[1],s3_i[1]}={s2_passthru_s3_r[1][2],s2_passthru_s3_i[1][2]};
-    assign {s3_r[2],s3_i[2]}={s2_passthru_s3_r[2][2],s2_passthru_s3_i[2][2]}; assign {s3_r[3],s3_i[3]}={s2_passthru_s3_r[3][2],s2_passthru_s3_i[3][2]};
-    assign {s3_r[4],s3_i[4]}={s2_passthru_s3_r[4][2],s2_passthru_s3_i[4][2]}; assign {s3_r[6],s3_i[6]}={s2_passthru_s3_r[5][2],s2_passthru_s3_i[5][2]};
+    assign s3_r[0]=s2_passthru_s3_r[0][2]; assign s3_i[0]=s2_passthru_s3_i[0][2];
+    assign s3_r[1]=s2_passthru_s3_r[1][2]; assign s3_i[1]=s2_passthru_s3_i[1][2];
+    assign s3_r[2]=s2_passthru_s3_r[2][2]; assign s3_i[2]=s2_passthru_s3_i[2][2];
+    assign s3_r[3]=s2_passthru_s3_r[3][2]; assign s3_i[3]=s2_passthru_s3_i[3][2];
+    assign s3_r[4]=s2_passthru_s3_r[4][2]; assign s3_i[4]=s2_passthru_s3_i[4][2];
+    assign s3_r[6]=s2_passthru_s3_r[5][2]; assign s3_i[6]=s2_passthru_s3_i[5][2];
 
     // --- STAGE 4: H on q1 (bit 1) --- Latency: 3 ---
     h_gate_simplified h_q1_p0 (.clk(clk), .rst_n(rst_n), .alpha_r(s3_r[0]), .alpha_i(s3_i[0]), .beta_r(s3_r[2]), .beta_i(s3_i[2]), .new_alpha_r(s4_r[0]), .new_alpha_i(s4_i[0]), .new_beta_r(s4_r[2]), .new_beta_i(s4_i[2]));
@@ -80,22 +110,37 @@ module qft3_top_pipelined(
     crot_pi_2_gate_pipelined c10_p0 (.clk(clk), .rst_n(rst_n), .ar(s4_r[3]), .ai(s4_i[3]), .pr(s5_r[3]), .pi(s5_i[3]));
     crot_pi_2_gate_pipelined c10_p1 (.clk(clk), .rst_n(rst_n), .ar(s4_r[7]), .ai(s4_i[7]), .pr(s5_r[7]), .pi(s5_i[7]));
     // Pass-through s4[0..2] and s4[4..6] with 3-cycle delay
-    reg signed [`TOTAL_WIDTH-1:0] s4_passthru_s5_r [0:5][0:2], s4_passthru_s5_i [0:5][0:2];
+    reg signed [`TOTAL_WIDTH-1:0] s4_passthru_s5_r [0:5][0:2];
+    reg signed [`TOTAL_WIDTH-1:0] s4_passthru_s5_i [0:5][0:2];
     always @(posedge clk or negedge rst_n) begin
-        if(!rst_n) for(j=0;j<6;j=j+1) for(i=0;i<3;i=i+1) {s4_passthru_s5_r[j][i],s4_passthru_s5_i[j][i]} <= 0;
-        else begin
-            {s4_passthru_s5_r[0][0],s4_passthru_s5_i[0][0]} <= {s4_r[0],s4_i[0]}; {s4_passthru_s5_r[1][0],s4_passthru_s5_i[1][0]} <= {s4_r[1],s4_i[1]};
-            {s4_passthru_s5_r[2][0],s4_passthru_s5_i[2][0]} <= {s4_r[2],s4_i[2]}; {s4_passthru_s5_r[3][0],s4_passthru_s5_i[3][0]} <= {s4_r[4],s4_i[4]};
-            {s4_passthru_s5_r[4][0],s4_passthru_s5_i[4][0]} <= {s4_r[5],s4_i[5]}; {s4_passthru_s5_r[5][0],s4_passthru_s5_i[5][0]} <= {s4_r[6],s4_i[6]};
+        if(!rst_n) begin
             for(j=0;j<6;j=j+1) begin
-                {s4_passthru_s5_r[j][1],s4_passthru_s5_i[j][1]} <= {s4_passthru_s5_r[j][0],s4_passthru_s5_i[j][0]};
-                {s4_passthru_s5_r[j][2],s4_passthru_s5_i[j][2]} <= {s4_passthru_s5_r[j][1],s4_passthru_s5_i[j][1]};
+                for(i=0;i<3;i=i+1) begin
+                    s4_passthru_s5_r[j][i] <= 0;
+                    s4_passthru_s5_i[j][i] <= 0;
+                end
+            end
+        end else begin
+            s4_passthru_s5_r[0][0] <= s4_r[0]; s4_passthru_s5_i[0][0] <= s4_i[0];
+            s4_passthru_s5_r[1][0] <= s4_r[1]; s4_passthru_s5_i[1][0] <= s4_i[1];
+            s4_passthru_s5_r[2][0] <= s4_r[2]; s4_passthru_s5_i[2][0] <= s4_i[2];
+            s4_passthru_s5_r[3][0] <= s4_r[4]; s4_passthru_s5_i[3][0] <= s4_i[4];
+            s4_passthru_s5_r[4][0] <= s4_r[5]; s4_passthru_s5_i[4][0] <= s4_i[5];
+            s4_passthru_s5_r[5][0] <= s4_r[6]; s4_passthru_s5_i[5][0] <= s4_i[6];
+            for(j=0;j<6;j=j+1) begin
+                s4_passthru_s5_r[j][1] <= s4_passthru_s5_r[j][0];
+                s4_passthru_s5_i[j][1] <= s4_passthru_s5_i[j][0];
+                s4_passthru_s5_r[j][2] <= s4_passthru_s5_r[j][1];
+                s4_passthru_s5_i[j][2] <= s4_passthru_s5_i[j][1];
             end
         end
     end
-    assign {s5_r[0],s5_i[0]}={s4_passthru_s5_r[0][2],s4_passthru_s5_i[0][2]}; assign {s5_r[1],s5_i[1]}={s4_passthru_s5_r[1][2],s4_passthru_s5_i[1][2]};
-    assign {s5_r[2],s5_i[2]}={s4_passthru_s5_r[2][2],s4_passthru_s5_i[2][2]}; assign {s5_r[4],s5_i[4]}={s4_passthru_s5_r[3][2],s4_passthru_s5_i[3][2]};
-    assign {s5_r[5],s5_i[5]}={s4_passthru_s5_r[4][2],s4_passthru_s5_i[4][2]}; assign {s5_r[6],s5_i[6]}={s4_passthru_s5_r[5][2],s4_passthru_s5_i[5][2]};
+    assign s5_r[0]=s4_passthru_s5_r[0][2]; assign s5_i[0]=s4_passthru_s5_i[0][2];
+    assign s5_r[1]=s4_passthru_s5_r[1][2]; assign s5_i[1]=s4_passthru_s5_i[1][2];
+    assign s5_r[2]=s4_passthru_s5_r[2][2]; assign s5_i[2]=s4_passthru_s5_i[2][2];
+    assign s5_r[4]=s4_passthru_s5_r[3][2]; assign s5_i[4]=s4_passthru_s5_i[3][2];
+    assign s5_r[5]=s4_passthru_s5_r[4][2]; assign s5_i[5]=s4_passthru_s5_i[4][2];
+    assign s5_r[6]=s4_passthru_s5_r[5][2]; assign s5_i[6]=s4_passthru_s5_i[5][2];
 
     // --- STAGE 6: H on q0 (bit 0) --- Latency: 3 ---
     h_gate_simplified h_q0_p0 (.clk(clk), .rst_n(rst_n), .alpha_r(s5_r[0]), .alpha_i(s5_i[0]), .beta_r(s5_r[1]), .beta_i(s5_i[1]), .new_alpha_r(s6_r[0]), .new_alpha_i(s6_i[0]), .new_beta_r(s6_r[1]), .new_beta_i(s6_i[1]));
@@ -121,13 +166,15 @@ module qft3_top_pipelined(
 
     always @(posedge clk or negedge rst_n) begin
         if(!rst_n) begin
-            {f000_r_reg, f000_i_reg} <= 0; {f010_r_reg, f010_i_reg} <= 0;
-            {f101_r_reg, f101_i_reg} <= 0; {f111_r_reg, f111_i_reg} <= 0;
+            f000_r_reg <= 0; f000_i_reg <= 0;
+            f010_r_reg <= 0; f010_i_reg <= 0;
+            f101_r_reg <= 0; f101_i_reg <= 0;
+            f111_r_reg <= 0; f111_i_reg <= 0;
         end else begin
-            {f000_r_reg, f000_i_reg} <= {s6_r[0], s6_i[0]};
-            {f010_r_reg, f010_i_reg} <= {s6_r[2], s6_i[2]};
-            {f101_r_reg, f101_i_reg} <= {s6_r[5], s6_i[5]};
-            {f111_r_reg, f111_i_reg} <= {s6_r[7], s6_i[7]};
+            f000_r_reg <= s6_r[0]; f000_i_reg <= s6_i[0];
+            f010_r_reg <= s6_r[2]; f010_i_reg <= s6_i[2];
+            f101_r_reg <= s6_r[5]; f101_i_reg <= s6_i[5];
+            f111_r_reg <= s6_r[7]; f111_i_reg <= s6_i[7];
         end
     end
 

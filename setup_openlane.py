@@ -94,7 +94,6 @@ def setup_openlane_source():
     run_command(download_command, shell=True)
     print("✅ OpenLane source downloaded successfully.")
 
-
 def install_dependencies():
     """
     Installs both Nix and Python dependencies for OpenLane.

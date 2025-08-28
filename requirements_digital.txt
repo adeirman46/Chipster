@@ -1,0 +1,104 @@
+# Core frameworks
+
+fastapi==0.115.6
+uvicorn==0.34.0
+pydantic==2.11.3
+python-dotenv==1.0.1
+
+
+
+# ML & Deep Learning
+
+torch==2.6.0
+torchvision==0.21.0
+torchaudio==2.6.0
+transformers==4.51.3
+sentence-transformers==4.1.0
+scikit-learn==1.6.1
+numpy==1.26.4
+pandas==2.2.3
+
+
+
+# Langchain and vector DB
+
+langchain==0.3.24
+langchain-core==0.3.72
+langchain-openai==0.2.12
+chromadb==0.5.20
+faiss-cpu==1.11.0.post1
+
+
+
+# Tokenizers & Efficiency
+
+tiktoken==0.8.0
+sentencepiece==0.2.0
+safetensors==0.4.3
+
+
+
+# Serving and API Clients
+
+httpx==0.28.1
+requests==2.32.3
+aiohttp==3.11.10
+
+
+
+# Optional (only if using gradio or streamlit)
+
+gradio_client==1.5.2
+streamlit==1.46.1
+
+
+
+# If you are doing vision-related work
+
+opencv-python==4.11.0.86
+Pillow==10.3.0
+
+
+
+# Others related
+
+matplotlib
+nest_asyncio
+langchain_google_genai
+langchain_community
+bitsandbytes
+ipython
+sootty
+accelerate
+
+
+
+# Crawling data
+
+googlesearch-python
+nest_asyncio
+PyGithub
+langgraph
+pandas
+tqdm
+sentence-transformers
+langchain-huggingface
+graphviz
+sootty
+unstructured
+
+
+
+# Deep Agents
+
+deepagents
+
+
+
+# Database Creation
+
+fitz
+pdf2image
+simple_image_download
+scikit-image
+

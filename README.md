@@ -1,20 +1,22 @@
 # Chipster: LLM for Chip Design Automation
 
-Chipster is a unified platform that leverages Large Language Models (LLMs) to accelerate the digital chip design process. It integrates two powerful tools:
+Chipster is a unified platform that leverages Large Language Models (LLMs) to accelerate the digital, analog, and photonics chip design process. 
 
-1.  **Verilog Generator**: An automated RTL-to-GDSII flow that translates high-level functional descriptions into synthesizable Verilog, ready for physical design.
-2.  **Standard Cell Generator**: An AI-powered tool to generate `.mag` physical layout files for standard digital logic cells from simple text prompts.
+For Digital Chip, it encoporates Multi Agent AI with RAG, it integrates two powerful tools:
+
+1.  **Verilog Generator**: Just input your prompt, let say "Quantum Fourier Transform", then it will search codes through the internet (github repos) and local databases. The agents will retrieve and generate verilog codes and pass it to icarus verilog for verification. The agents will loop it back and forth until got synthesizable Verilog, ready for physical design.
+2.  **Chip Digital Generator**: Upload the generated RTL, set the desired chip size and number of pinouts, it automatically re-update the RTL to match your needs. Also it integrated with modified OpenLane 2 to perform synthesis, placement, routing. correct Static Timing Analysis (STA) and Antenna Violations. Also the updated RTL also bypassed automatic iverilog verifications too.
+3.  **Standard Cell Generator**: OPTIONAL, An AI-powered tool to generate `.mag` physical layout files for standard digital logic cells from simple text prompts.
+
+For Analog Chip, it integrates two powerful tools (Under Construction!!!):
+
+1.  **PySpice AMS & RF Circuit Generator**: Just input your prompt, let say "3 bit flash ADS", then it will search codes through the local databases. The agents will retrieve and generate pyspice codes and pass it to ngspice for verification.
+2.  **Chip Analog Generator**: Upload the generated PySpice, it will generate GDS file automatically using GLayout.
+
+For Photonics Chip (Future Works!!!):
 
 ### Verilog Generation Workflow
 <img src="assets/verilog_flow_overview.png" alt="Verilog Workflow Diagram" width="100%">
-
-## Features
-
--   **Natural Language to RTL**: Describe a digital module, and the LLM generates the Verilog code.
--   **Automated Verification**: Automatically generates testbenches and runs simulations with Icarus Verilog.
--   **Full Synthesis Flow**: Integrates with OpenLane to perform synthesis, placement, and routing.
--   **AI-Powered Layout**: Generates standard cell layouts using a Retrieval-Augmented Generation (RAG) approach.
--   **Interactive UI**: Built with Streamlit for an intuitive and interactive user experience.
 
 ## Demos and Results
 
@@ -52,12 +54,16 @@ For detailed instructions on setup, usage, and architecture, please see our full
     cd Chipster
     ```
 
-2.  **Set up the environment:**
-    Ensure you have Conda, Docker, Icarus Verilog, and OpenLane installed.
+2.  **Set up the environment (Digital):**
+    Ensure you have Conda, Docker, and Icarus Verilog installed.
     ```bash
-    conda create -n chipster_env python=3.11
-    conda activate chipster_env
-    pip install -r requirements.txt
+    sudo apt install iverilog
+    ```
+    ```bash
+    conda create -n chipster_D python=3.11
+    conda activate chipster_D
+    pip install -r requirements_digital.txt
+    pip install crawl4ai
     crawl4ai-setup
     crawl4ai-doctor
     ```
@@ -69,8 +75,25 @@ For detailed instructions on setup, usage, and architecture, please see our full
     ```bash
     python setup_openlane.py
     ```
+    Download Faiss Index of Datasets and put this into /data/verilog_datasets from this ![link](https://drive.google.com/drive/folders/1PnP24UWxMYdhPm63cbKbdOwyxkNUguA5?usp=sharing)
 
-3.  **Run the application:**
+3.  **Set up the environment (Analog):**
+    Ensure you have Conda and Docker installed.
+    ```bash
+    conda create -n chipster_A python=3.11
+    conda activate chipster_A
+    pip install -r requirements_analog.txt
+    ```
+    Create .env file and enter your Gemini API.
+    ```bash
+    GOOGLE_API_KEY="YOUR_API"
+    ```
+    Setup the OpenLane 2 environment. Just retrieve the PDKs, OpenLane 2 not being used.
+    ```bash
+    python setup_openlane.py
+    ```
+
+4.  **Run the application:**
     Go to src/ then pick folder you want to run, for example, if you want to run the verilog_generator/ then go to the folder and then run the program.
     ```bash
     streamlit run main.py
@@ -81,7 +104,7 @@ For detailed instructions on setup, usage, and architecture, please see our full
 ### Project Mentor
 -   **Prof. Mehdi Saligane** (University of Michigan, Brown University)
 
-### Development Team 
+### Development Team (Digital)
 (Bandung Institute of Technology)
 -   Ade Irman Budi Hendriawan
 -   Najmi Azzahra

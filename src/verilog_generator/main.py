@@ -51,10 +51,10 @@ except KeyError:
 
 # --- Part 1: FAISS Index & Model Loading ---
 
-DATASET_PATH = "../../../data/verilog_datasets"
+DATASET_PATH = "../../data/verilog_datasets"
 INDEX_PATH_DATASET = os.path.join(DATASET_PATH, "faiss_verilog_db")
 INDEX_PATH_QFT = os.path.join(DATASET_PATH, "faiss_qft_verieval") # NEW: Path for the second index
-GENERATED_CODE_PATH = "../../../examples/verilog_designs"
+GENERATED_CODE_PATH = "../../examples/verilog_designs"
 MAX_RETRIES = 10 # Maximum number of correction attempts
 
 @st.cache_resource

@@ -75,7 +75,7 @@ For detailed instructions on setup, usage, and architecture, please see our full
     ```bash
     python setup_openlane.py
     ```
-    Download Faiss Index of Datasets and put this into /data/verilog_datasets from this ![link](https://drive.google.com/drive/folders/1PnP24UWxMYdhPm63cbKbdOwyxkNUguA5?usp=sharing)
+    Download Faiss Index of Datasets and put this into /data/verilog_datasets from this [LINK](https://drive.google.com/drive/folders/1PnP24UWxMYdhPm63cbKbdOwyxkNUguA5?usp=sharing)
 
 3.  **Set up the environment (Analog):**
     Ensure you have Conda and Docker installed.

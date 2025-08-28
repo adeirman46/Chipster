@@ -10,7 +10,7 @@ For Digital Chip, it encoporates Multi Agent AI with RAG, it integrates two powe
 
 For Analog Chip, it integrates two powerful tools (Under Construction!!!):
 
-1.  **PySpice AMS & RF Circuit Generator**: Just input your prompt, let say "3 bit flash ADS", then it will search codes through the local databases. The agents will retrieve and generate pyspice codes and pass it to ngspice for verification.
+1.  **PySpice AMS & RF Circuit Generator**: Just input your prompt, let say "3 bit flash ADC", then it will find context from the local databases. The agents will retrieve and generate pyspice codes and pass it to ngspice for verification.
 2.  **Chip Analog Generator**: Upload the generated PySpice, it will generate GDS file automatically using GLayout.
 
 For Photonics Chip (Future Works!!!):
